@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Parser from 'rss-parser';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { kv } from '@vercel/kv';
+import { createClient } from '@vercel/kv';
 
 const parser = new Parser();
+
+function getKvClient() {
+  const url = process.env.KV_REST_API_URL?.trim();
+  const token = process.env.KV_REST_API_TOKEN?.trim();
+  if (!url || !token) {
+    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN must be set');
+  }
+  try {
+    return createClient({ url, token });
+  } catch (err) {
+    // Invalid URL 등 클라이언트 생성 실패 시 상세 에러 대신 안전한 메시지
+    throw new Error('KV client could not be created. Check KV_REST_API_URL and KV_REST_API_TOKEN.');
+  }
+}
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -80,7 +94,18 @@ export async function GET(req: NextRequest) {
     
     const summarizedNews = JSON.parse(jsonMatch[0]);
 
-    // Save to Vercel KV
+    // Save to Vercel KV (KV_REST_API_URL, KV_REST_API_TOKEN 사용)
+    let kv;
+    try {
+      kv = getKvClient();
+    } catch (kvErr) {
+      const msg = kvErr instanceof Error ? kvErr.message : 'Invalid URL or missing KV env';
+      console.error('KV client init failed:', msg);
+      return NextResponse.json(
+        { success: false, error: 'KV storage is not configured. Set KV_REST_API_URL and KV_REST_API_TOKEN.' },
+        { status: 500 }
+      );
+    }
     await kv.set('daily_news', {
       updatedAt: new Date().toISOString(),
       news: summarizedNews,
@@ -93,7 +118,12 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: unknown) {
     console.error('Cron job error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    const rawMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    // Invalid URL 등 KV 관련 에러는 상세 내용 노출 방지
+    const errorMessage =
+      /invalid url|KV_REST_API|KV storage/i.test(rawMessage) || rawMessage === 'Invalid URL'
+        ? 'KV storage is not configured or invalid. Set KV_REST_API_URL and KV_REST_API_TOKEN.'
+        : rawMessage;
     return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
