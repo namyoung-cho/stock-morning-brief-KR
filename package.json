@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@vercel/kv": "^3.0.0",
     "ai": "^6.0.90",
+    "ioredis": "^5.9.3",
     "lucide-react": "^0.574.0",
     "next": "14.2.16",
     "react": "^18",

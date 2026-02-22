@@ -1,23 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Parser from 'rss-parser';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createClient } from '@vercel/kv';
+import { getRedis } from '@/lib/redis';
 
 const parser = new Parser();
-
-function getKvClient() {
-  const url = process.env.KV_REST_API_URL?.trim();
-  const token = process.env.KV_REST_API_TOKEN?.trim();
-  if (!url || !token) {
-    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN must be set');
-  }
-  try {
-    return createClient({ url, token });
-  } catch {
-    // Invalid URL 등 클라이언트 생성 실패 시 상세 에러 대신 안전한 메시지
-    throw new Error('KV client could not be created. Check KV_REST_API_URL and KV_REST_API_TOKEN.');
-  }
-}
+const REDIS_KEY = 'daily_news';
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -94,22 +81,24 @@ export async function GET(req: NextRequest) {
     
     const summarizedNews = JSON.parse(jsonMatch[0]);
 
-    // Save to Vercel KV (KV_REST_API_URL, KV_REST_API_TOKEN 사용)
-    let kv;
+    // Save to Redis (REDIS_URL 사용)
     try {
-      kv = getKvClient();
-    } catch (kvErr) {
-      const msg = kvErr instanceof Error ? kvErr.message : 'Invalid URL or missing KV env';
-      console.error('KV client init failed:', msg);
+      const redis = getRedis();
+      await redis.set(
+        REDIS_KEY,
+        JSON.stringify({
+          updatedAt: new Date().toISOString(),
+          news: summarizedNews,
+        })
+      );
+    } catch (redisErr) {
+      const msg = redisErr instanceof Error ? redisErr.message : 'Redis connection failed';
+      console.error('Redis failed:', msg);
       return NextResponse.json(
-        { success: false, error: 'KV storage is not configured. Set KV_REST_API_URL and KV_REST_API_TOKEN.' },
+        { success: false, error: 'Redis is not configured. Set REDIS_URL.' },
         { status: 500 }
       );
     }
-    await kv.set('daily_news', {
-      updatedAt: new Date().toISOString(),
-      news: summarizedNews,
-    });
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>뉴스 업데이트</title></head><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto;padding:1rem;text-align:center;"><h1>뉴스 업데이트 성공!</h1><p>${summarizedNews.length}건이 반영되었습니다.</p></body></html>`;
     return new NextResponse(html, {
@@ -121,8 +110,8 @@ export async function GET(req: NextRequest) {
     const rawMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     // Invalid URL 등 KV 관련 에러는 상세 내용 노출 방지
     const errorMessage =
-      /invalid url|KV_REST_API|KV storage/i.test(rawMessage) || rawMessage === 'Invalid URL'
-        ? 'KV storage is not configured or invalid. Set KV_REST_API_URL and KV_REST_API_TOKEN.'
+      /redis|REDIS_URL|connection refused/i.test(rawMessage)
+        ? 'Redis is not configured or unreachable. Set REDIS_URL.'
         : rawMessage;
     return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }

@@ -1,4 +1,4 @@
-import { kv } from '@vercel/kv';
+import { getRedis } from '@/lib/redis';
 import { Newspaper, TrendingUp, Calendar } from 'lucide-react';
 
 interface NewsItem {
@@ -16,7 +16,14 @@ interface DailyNews {
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const data = await kv.get<DailyNews>('daily_news');
+  let data: DailyNews | null = null;
+  try {
+    const redis = getRedis();
+    const raw = await redis.get('daily_news');
+    if (raw) data = JSON.parse(raw) as DailyNews;
+  } catch {
+    // REDIS_URL 미설정 또는 연결 실패 시 뉴스 없음으로 표시
+  }
 
   return (
     <main className="min-h-screen bg-neutral-50 text-neutral-900 font-sans">
@@ -79,7 +86,7 @@ export default async function Home() {
       </div>
 
       <footer className="max-w-4xl mx-auto py-12 px-6 border-t border-neutral-200 text-center text-neutral-400 text-sm">
-        <p>© {new Date().getFullYear()} Stock Morning Brief. Powered by Gemini AI & Vercel KV.</p>
+        <p>© {new Date().getFullYear()} Stock Morning Brief. Powered by Gemini AI & Redis.</p>
       </footer>
     </main>
   );
