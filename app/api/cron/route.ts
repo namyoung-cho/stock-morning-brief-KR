@@ -11,8 +11,15 @@ const RSS_FEEDS = [
 ];
 
 export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  // 브라우저 주소창 직접 호출 시 ?secret=CRON_SECRET 값으로 인증
+  const secretParam = req.nextUrl.searchParams.get('secret')?.trim();
+
+  const headerOk = Boolean(cronSecret && authHeader === `Bearer ${cronSecret}`);
+  const queryOk = Boolean(cronSecret && secretParam && secretParam === cronSecret);
+
+  if (!headerOk && !queryOk) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
@@ -79,7 +86,11 @@ export async function GET(req: NextRequest) {
       news: summarizedNews,
     });
 
-    return NextResponse.json({ success: true, count: summarizedNews.length });
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>뉴스 업데이트</title></head><body style="font-family:sans-serif;max-width:32rem;margin:4rem auto;padding:1rem;text-align:center;"><h1>뉴스 업데이트 성공!</h1><p>${summarizedNews.length}건이 반영되었습니다.</p></body></html>`;
+    return new NextResponse(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
   } catch (error: unknown) {
     console.error('Cron job error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
