@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       })));
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-latest' });
 
     const prompt = `
       You are a stock market expert. Summarize the following news items into a concise format for a "Stock Morning Brief".
