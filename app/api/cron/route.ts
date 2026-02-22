@@ -13,7 +13,7 @@ function getKvClient() {
   }
   try {
     return createClient({ url, token });
-  } catch (_) {
+  } catch {
     // Invalid URL 등 클라이언트 생성 실패 시 상세 에러 대신 안전한 메시지
     throw new Error('KV client could not be created. Check KV_REST_API_URL and KV_REST_API_TOKEN.');
   }
