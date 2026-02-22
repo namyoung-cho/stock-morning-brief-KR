@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Parser from 'rss-parser';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getRedis } from '@/lib/redis';
 
 const parser = new Parser();
 const REDIS_KEY = 'daily_news';
-const GEMINI_MODEL = 'gemini-1.5-flash';
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/** 정식 v1 API 사용 (v1beta 대신). Gemini 3 Flash 우선, 404 시 1.5 Flash 폴백 */
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1';
+const GEMINI_MODEL_PRIMARY = 'gemini-3-flash';
+const GEMINI_MODEL_FALLBACK = 'gemini-1.5-flash';
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -34,8 +35,6 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     );
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
 
   try {
     const allNews = [];
@@ -70,26 +69,52 @@ export async function GET(req: NextRequest) {
     `;
 
     type SummarizedItem = { title: string; link: string; summary: string; tickers: string[] };
-    let summarizedNews: SummarizedItem[];
-    try {
-      const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        throw new Error('Failed to parse Gemini response as JSON');
+    type GeminiGenerateResponse = {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    };
+    let summarizedNews: SummarizedItem[] | undefined;
+    const modelsToTry = [GEMINI_MODEL_PRIMARY, GEMINI_MODEL_FALLBACK];
+    let lastErr: unknown;
+
+    for (const modelId of modelsToTry) {
+      const url = `${GEMINI_API_BASE}/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          }),
+        });
+
+        if (!res.ok) {
+          if (res.status === 404) {
+            console.error('[Gemini 404] model:', modelId, '| API URL:', `${GEMINI_API_BASE}/models/${modelId}:generateContent`);
+          }
+          const errBody = await res.text();
+          lastErr = new Error(`Gemini API ${res.status}: ${errBody || res.statusText}`);
+          continue;
+        }
+
+        const data = (await res.json()) as GeminiGenerateResponse;
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+          lastErr = new Error('Failed to parse Gemini response as JSON');
+          continue;
+        }
+        summarizedNews = JSON.parse(jsonMatch[0]) as SummarizedItem[];
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.error('Gemini API error (model:', modelId, '):', err);
       }
-      summarizedNews = JSON.parse(jsonMatch[0]) as SummarizedItem[];
-    } catch (geminiErr: unknown) {
-      const is404 =
-        geminiErr instanceof Error &&
-        (/404|not found|NOT_FOUND/i.test(geminiErr.message) || (geminiErr as { status?: number }).status === 404);
-      if (is404) {
-        console.error('[Gemini 404] model:', GEMINI_MODEL, '| API URL:', `${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent`);
-      }
-      console.error('Gemini API error:', geminiErr);
-      throw geminiErr;
+    }
+
+    if (summarizedNews === undefined) {
+      console.error('Gemini API error (all models failed):', lastErr);
+      throw lastErr;
     }
 
     // Save to Redis (REDIS_URL 사용)
