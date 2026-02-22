@@ -4,10 +4,15 @@ import { getRedis } from '@/lib/redis';
 
 const parser = new Parser();
 const REDIS_KEY = 'daily_news';
-/** 정식 v1 API 사용 (v1beta 대신). Gemini 3 Flash 우선, 404 시 1.5 Flash 폴백 */
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1';
-const GEMINI_MODEL_PRIMARY = 'gemini-3-flash';
-const GEMINI_MODEL_FALLBACK = 'gemini-1.5-flash';
+/** v1 → v1beta 순 엔드포인트 탐색, 각 모델은 기본명 + models/ 접두어 형식으로 재시도 (총 8회) */
+const GEMINI_API_BASES = [
+  'https://generativelanguage.googleapis.com/v1',
+  'https://generativelanguage.googleapis.com/v1beta',
+] as const;
+const GEMINI_MODEL = 'gemini-3-flash';
+const GEMINI_MODEL_ALT = 'models/gemini-3-flash';
+const GEMINI_MODEL_25 = 'gemini-2.5-flash';
+const GEMINI_MODEL_25_ALT = 'models/gemini-2.5-flash';
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -73,43 +78,46 @@ export async function GET(req: NextRequest) {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
     let summarizedNews: SummarizedItem[] | undefined;
-    const modelsToTry = [GEMINI_MODEL_PRIMARY, GEMINI_MODEL_FALLBACK];
+    const modelIdsToTry = [GEMINI_MODEL, GEMINI_MODEL_ALT, GEMINI_MODEL_25, GEMINI_MODEL_25_ALT];
     let lastErr: unknown;
 
-    for (const modelId of modelsToTry) {
-      const url = `${GEMINI_API_BASE}/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          }),
-        });
+    for (const apiBase of GEMINI_API_BASES) {
+      for (const modelId of modelIdsToTry) {
+        const url = `${apiBase}/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            }),
+          });
 
-        if (!res.ok) {
-          if (res.status === 404) {
-            console.error('[Gemini 404] model:', modelId, '| API URL:', `${GEMINI_API_BASE}/models/${modelId}:generateContent`);
+          if (!res.ok) {
+            if (res.status === 404) {
+              console.error('[Gemini 404] model:', modelId, '| API URL:', `${apiBase}/models/${modelId}:generateContent`);
+            }
+            const errBody = await res.text();
+            lastErr = new Error(`Gemini API ${res.status}: ${errBody || res.statusText}`);
+            continue;
           }
-          const errBody = await res.text();
-          lastErr = new Error(`Gemini API ${res.status}: ${errBody || res.statusText}`);
-          continue;
-        }
 
-        const data = (await res.json()) as GeminiGenerateResponse;
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) {
-          lastErr = new Error('Failed to parse Gemini response as JSON');
-          continue;
+          const data = (await res.json()) as GeminiGenerateResponse;
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          const jsonMatch = text.match(/\[[\s\S]*\]/);
+          if (!jsonMatch) {
+            lastErr = new Error('Failed to parse Gemini response as JSON');
+            continue;
+          }
+          summarizedNews = JSON.parse(jsonMatch[0]) as SummarizedItem[];
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.error('Gemini API error (base:', apiBase, 'model:', modelId, '):', err);
         }
-        summarizedNews = JSON.parse(jsonMatch[0]) as SummarizedItem[];
-        lastErr = null;
-        break;
-      } catch (err) {
-        lastErr = err;
-        console.error('Gemini API error (model:', modelId, '):', err);
       }
+      if (summarizedNews !== undefined) break;
     }
 
     if (summarizedNews === undefined) {
