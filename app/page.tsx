@@ -6,6 +6,7 @@ interface NewsItem {
   link: string;
   summary: string;
   tickers: string[];
+  section?: 'kr' | 'us';
 }
 
 interface DailyNews {
@@ -51,36 +52,75 @@ export default async function Home() {
           </div>
         ) : (
           <div className="grid gap-8">
-            {data.news.map((item, index) => (
-              <article key={index} className="bg-white p-8 rounded-2xl border border-neutral-200 shadow-sm hover:shadow-md transition-shadow">
-                <a 
-                  href={item.link} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="group"
-                >
-                  <h2 className="text-xl font-bold mb-4 group-hover:text-blue-600 transition-colors leading-snug">
-                    {item.title}
+            {(['kr', 'us'] as const).map((section) => {
+              const items = data.news.filter((n) => n.section === section);
+              if (items.length === 0) return null;
+              const title = section === 'kr' ? '🇰🇷 한국 주요 경제 뉴스 (Top 5)' : '🇺🇸 미국 주요 경제 뉴스 (Top 5)';
+              return (
+                <section key={section}>
+                  <h2 className="text-xl font-bold mb-6 text-neutral-800 border-b border-neutral-200 pb-2">
+                    {title}
                   </h2>
-                </a>
-                <div className="space-y-2 mb-6 text-neutral-700 leading-relaxed whitespace-pre-line">
-                  {item.summary}
-                </div>
-                {item.tickers && item.tickers.length > 0 && (
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <TrendingUp className="w-4 h-4 text-emerald-500" />
-                    {item.tickers.map((ticker) => (
-                      <span 
-                        key={ticker} 
-                        className="px-2 py-1 bg-neutral-100 text-neutral-600 text-xs font-semibold rounded-md border border-neutral-200"
-                      >
-                        ${ticker}
-                      </span>
+                  <div className="grid gap-6">
+                    {items.map((item, index) => (
+                      <article key={`${section}-${index}`} className="bg-white p-8 rounded-2xl border border-neutral-200 shadow-sm hover:shadow-md transition-shadow">
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group"
+                        >
+                          <h3 className="text-lg font-bold mb-3 group-hover:text-blue-600 transition-colors leading-snug">
+                            {item.title}
+                          </h3>
+                        </a>
+                        <div className="space-y-2 mb-6 text-neutral-700 leading-relaxed whitespace-pre-line">
+                          {item.summary}
+                        </div>
+                        {item.tickers && item.tickers.length > 0 && (
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <TrendingUp className="w-4 h-4 text-emerald-500" />
+                            <span className="text-neutral-500 text-sm font-medium">관련 기업:</span>
+                            {item.tickers.map((ticker) => (
+                              <span
+                                key={ticker}
+                                className="px-2 py-1 bg-neutral-100 text-neutral-600 text-xs font-semibold rounded-md border border-neutral-200"
+                              >
+                                {ticker}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </article>
                     ))}
                   </div>
-                )}
-              </article>
-            ))}
+                </section>
+              );
+            })}
+            {data.news.some((n) => !n.section) && (
+              <section>
+                <h2 className="text-xl font-bold mb-6 text-neutral-800 border-b border-neutral-200 pb-2">뉴스</h2>
+                <div className="grid gap-6">
+                  {data.news.filter((n) => !n.section).map((item, index) => (
+                    <article key={index} className="bg-white p-8 rounded-2xl border border-neutral-200 shadow-sm hover:shadow-md transition-shadow">
+                      <a href={item.link} target="_blank" rel="noopener noreferrer" className="group">
+                        <h3 className="text-lg font-bold mb-3 group-hover:text-blue-600 transition-colors leading-snug">{item.title}</h3>
+                      </a>
+                      <div className="space-y-2 mb-6 text-neutral-700 leading-relaxed whitespace-pre-line">{item.summary}</div>
+                      {item.tickers?.length > 0 && (
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <TrendingUp className="w-4 h-4 text-emerald-500" />
+                          <span className="text-neutral-500 text-sm font-medium">관련 기업:</span>
+                          {item.tickers.map((t) => (
+                            <span key={t} className="px-2 py-1 bg-neutral-100 text-neutral-600 text-xs font-semibold rounded-md border border-neutral-200">{t}</span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
       </div>

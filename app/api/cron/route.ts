@@ -55,25 +55,44 @@ export async function GET(req: NextRequest) {
     }
 
     const prompt = `
-      You are a stock market expert. Summarize the following news items into a concise format for a "Stock Morning Brief".
-      
-      For each news item, provide:
-      1. A 3-line summary in Korean.
-      2. Relevant stock tickers (if any).
-      
-      Format the output as a JSON array of objects with the following structure:
-      {
-        "title": "Original news title",
-        "link": "Original link",
-        "summary": "3-line Korean summary here",
-        "tickers": ["TICKER1", "TICKER2"]
-      }
+당신은 투자자용 모닝 브리프를 작성하는 전문가입니다. 아래 뉴스 목록에서 다음 규칙에 맞춰 분석해 주세요.
 
-      News items:
-      ${JSON.stringify(allNews)}
-    `;
+【뉴스 구성】
+- 한국 경제 뉴스 Top 5개, 미국 경제 뉴스 Top 5개를 각각 선정할 것.
+- 주어진 항목 중 한국 관련은 kr, 미국 관련은 us로 구분하여 각 5개씩만 선정할 것.
 
-    type SummarizedItem = { title: string; link: string; summary: string; tickers: string[] };
+【출력 형식 (각 뉴스마다 준수)】
+- **[뉴스 제목]**을 반드시 포함할 것.
+- 해당 뉴스를 3줄 이내로 요약할 것.
+- 이 뉴스에 영향을 받는 관련 기업명을 명시할 것.
+
+【톤앤매너】
+- 투자자에게 도움이 되도록 전문적이고 간결한 말투를 사용할 것.
+
+【결과물 구조】
+반드시 아래 JSON 형태로만 출력할 것. 다른 설명이나 마크다운 없이 JSON만 출력.
+
+{
+  "kr": [
+    { "title": "뉴스 제목", "link": "기사 URL", "summary": "3줄 이내 요약", "relatedCompanies": ["기업1", "기업2"] }
+  ],
+  "us": [
+    { "title": "뉴스 제목", "link": "기사 URL", "summary": "3줄 이내 요약", "relatedCompanies": ["기업1", "기업2"] }
+  ]
+}
+
+- kr 배열에는 한국 주요 경제 뉴스 Top 5, us 배열에는 미국 주요 경제 뉴스 Top 5를 넣을 것.
+- 각 뉴스의 summary는 **[제목]**에 이어서 요약 문장만 작성해도 되고, relatedCompanies는 해당 뉴스에 영향을 받는 기업명(한글 또는 영문) 배열로 넣을 것.
+
+뉴스 원본 목록:
+${JSON.stringify(allNews)}
+`;
+
+    type SummarizedItem = { title: string; link: string; summary: string; tickers: string[]; section?: 'kr' | 'us' };
+    type GeminiBriefRaw = {
+      kr: Array<{ title: string; link: string; summary: string; relatedCompanies?: string[] }>;
+      us: Array<{ title: string; link: string; summary: string; relatedCompanies?: string[] }>;
+    };
     type GeminiGenerateResponse = {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
@@ -104,12 +123,31 @@ export async function GET(req: NextRequest) {
 
           const data = (await res.json()) as GeminiGenerateResponse;
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-          const jsonMatch = text.match(/\[[\s\S]*\]/);
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
           if (!jsonMatch) {
             lastErr = new Error('Failed to parse Gemini response as JSON');
             continue;
           }
-          summarizedNews = JSON.parse(jsonMatch[0]) as SummarizedItem[];
+          const parsed = JSON.parse(jsonMatch[0]) as GeminiBriefRaw;
+          if (!Array.isArray(parsed.kr) || !Array.isArray(parsed.us)) {
+            lastErr = new Error('Gemini response missing kr or us array');
+            continue;
+          }
+          const kr = parsed.kr.map((i) => ({
+            title: i.title,
+            link: i.link,
+            summary: i.summary,
+            tickers: i.relatedCompanies ?? [],
+            section: 'kr' as const,
+          }));
+          const us = parsed.us.map((i) => ({
+            title: i.title,
+            link: i.link,
+            summary: i.summary,
+            tickers: i.relatedCompanies ?? [],
+            section: 'us' as const,
+          }));
+          summarizedNews = [...kr, ...us];
           lastErr = null;
           break;
         } catch (err) {
