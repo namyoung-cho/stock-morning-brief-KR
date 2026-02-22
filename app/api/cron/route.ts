@@ -4,7 +4,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { kv } from '@vercel/kv';
 
 const parser = new Parser();
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || '');
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -16,6 +15,17 @@ export async function GET(req: NextRequest) {
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
+
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    console.error('GOOGLE_API_KEY is not set in environment variables');
+    return NextResponse.json(
+      { success: false, error: 'GOOGLE_API_KEY is not configured' },
+      { status: 500 }
+    );
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
 
   try {
     const allNews = [];
