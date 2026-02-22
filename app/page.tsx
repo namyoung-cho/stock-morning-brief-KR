@@ -18,10 +18,17 @@ export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   let data: DailyNews | null = null;
+  let views = 0; // 조회수를 담을 변수 추가
+
   try {
     const redis = getRedis();
+    
+    // 1. 뉴스 데이터 가져오기
     const raw = await redis.get('daily_news');
     if (raw) data = JSON.parse(raw) as DailyNews;
+
+    // 2. 방문할 때마다 조회수 1 증가시키기
+    views = await redis.incr('page_views');
   } catch {
     // REDIS_URL 미설정 또는 연결 실패 시 뉴스 없음으로 표시
   }
@@ -31,18 +38,30 @@ export default async function Home() {
       <header className="max-w-4xl mx-auto pt-16 pb-8 px-6 border-b border-neutral-200">
         <div className="flex items-center gap-2 mb-4">
           <Newspaper className="w-8 h-8 text-blue-600" />
-          <h1 className="text-3xl font-bold tracking-tight">Stock Morning Brief</h1>
+          {/* 제목을 Morning News Brief로 수정 */}
+          <h1 className="text-3xl font-bold tracking-tight">Morning News Brief</h1>
         </div>
-        <p className="text-neutral-500 flex items-center gap-2">
-          <Calendar className="w-4 h-4" />
-          {data ? new Date(data.updatedAt).toLocaleDateString('ko-KR', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          }) : '업데이트 정보 없음'}
-        </p>
+        
+        {/* 날짜와 조회수를 양옆으로 배치 (justify-between 사용) */}
+        <div className="flex justify-between items-center">
+          <p className="text-neutral-500 flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            {data ? new Date(data.updatedAt).toLocaleDateString('ko-KR', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }) : '업데이트 정보 없음'}
+          </p>
+          
+          {/* 오른쪽에 작은 폰트로 조회수 표시 */}
+          {views > 0 && (
+            <span className="text-xs text-neutral-400 font-medium">
+              오늘의 사이트 조회 수: {views}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="max-w-4xl mx-auto py-12 px-6">
@@ -126,7 +145,7 @@ export default async function Home() {
       </div>
 
       <footer className="max-w-4xl mx-auto py-12 px-6 border-t border-neutral-200 text-center text-neutral-400 text-sm">
-        <p>© {new Date().getFullYear()} Stock Morning Brief. Powered by Gemini AI & Redis.</p>
+        <p>© {new Date().getFullYear()} Morning News Brief. Powered by Gemini AI & Redis.</p>
       </footer>
     </main>
   );
