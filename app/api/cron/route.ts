@@ -1,9 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Parser from 'rss-parser';
 import { getRedis } from '@/lib/redis';
+import { google } from 'googleapis';
 
 const parser = new Parser();
 const REDIS_KEY = 'daily_news';
+
+type SummarizedItem = {
+  title: string;
+  link: string;
+  summary: string;
+  tickers: string[];
+  section?: 'kr' | 'us';
+};
+
+async function postToBlogger(newsData: SummarizedItem[]) {
+  try {
+    const clientId = process.env.BLOGGER_CLIENT_ID;
+    const clientSecret = process.env.BLOGGER_CLIENT_SECRET;
+    const refreshToken = process.env.BLOGGER_REFRESH_TOKEN;
+    const blogId = process.env.BLOGGER_BLOG_ID;
+
+    if (!clientId || !clientSecret || !refreshToken || !blogId) {
+      console.error('Missing Blogger configuration environment variables');
+      return;
+    }
+
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+
+    const blogger = google.blogger({ version: 'v3', auth: oauth2Client });
+
+    const today = new Date().toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const krNews = newsData.filter((item) => item.section === 'kr');
+    const usNews = newsData.filter((item) => item.section === 'us');
+
+    let htmlContent = `<h2>[한국 경제 뉴스]</h2><ul>`;
+    krNews.forEach((item) => {
+      htmlContent += `<li><strong><a href="${item.link}">${
+        item.title
+      }</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(
+        ', '
+      )}</em></li><br/>`;
+    });
+    htmlContent += `</ul>`;
+
+    htmlContent += `<h2>[미국 경제 뉴스]</h2><ul>`;
+    usNews.forEach((item) => {
+      htmlContent += `<li><strong><a href="${item.link}">${
+        item.title
+      }</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(
+        ', '
+      )}</em></li><br/>`;
+    });
+    htmlContent += `</ul>`;
+
+    await blogger.posts.insert({
+      blogId: blogId,
+      requestBody: {
+        title: `[${today}] Morning News Brief - AI 경제 브리핑`,
+        content: htmlContent,
+      },
+    });
+    console.log('Successfully posted to Blogger');
+  } catch (error) {
+    console.error('Error posting to Blogger:', error);
+  }
+}
 /** v1 → v1beta 순 엔드포인트 탐색, 각 모델은 기본명 + models/ 접두어 형식으로 재시도 (총 8회) */
 const GEMINI_API_BASES = [
   'https://generativelanguage.googleapis.com/v1',
@@ -88,16 +156,30 @@ export async function GET(req: NextRequest) {
 ${JSON.stringify(allNews)}
 `;
 
-    type SummarizedItem = { title: string; link: string; summary: string; tickers: string[]; section?: 'kr' | 'us' };
     type GeminiBriefRaw = {
-      kr: Array<{ title: string; link: string; summary: string; relatedCompanies?: string[] }>;
-      us: Array<{ title: string; link: string; summary: string; relatedCompanies?: string[] }>;
+      kr: Array<{
+        title: string;
+        link: string;
+        summary: string;
+        relatedCompanies?: string[];
+      }>;
+      us: Array<{
+        title: string;
+        link: string;
+        summary: string;
+        relatedCompanies?: string[];
+      }>;
     };
     type GeminiGenerateResponse = {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
     let summarizedNews: SummarizedItem[] | undefined;
-    const modelIdsToTry = [GEMINI_MODEL, GEMINI_MODEL_ALT, GEMINI_MODEL_25, GEMINI_MODEL_25_ALT];
+    const modelIdsToTry = [
+      GEMINI_MODEL,
+      GEMINI_MODEL_ALT,
+      GEMINI_MODEL_25,
+      GEMINI_MODEL_25_ALT,
+    ];
     let lastErr: unknown;
 
     for (const apiBase of GEMINI_API_BASES) {
@@ -173,6 +255,8 @@ ${JSON.stringify(allNews)}
           news: summarizedNews,
         })
       );
+      // 포스팅 직후 Blogger에 게시
+      await postToBlogger(summarizedNews);
     } catch (redisErr) {
       const msg = redisErr instanceof Error ? redisErr.message : 'Redis connection failed';
       console.error('Redis failed:', msg);
