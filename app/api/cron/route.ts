@@ -77,10 +77,12 @@ const GEMINI_API_BASES = [
   'https://generativelanguage.googleapis.com/v1',
   'https://generativelanguage.googleapis.com/v1beta',
 ] as const;
-const GEMINI_MODEL = 'gemini-3-flash';
-const GEMINI_MODEL_ALT = 'models/gemini-3-flash';
+
+// 젬나이 모델 설정 (충돌 해결: 최신 모델명 유지)
+const GEMINI_MODEL = 'gemini-1.5-flash'; // 안정적인 기본 모델
+const GEMINI_MODEL_20 = 'gemini-2.0-flash'; // 최신 모델
+const GEMINI_MODEL_30 = 'gemini-3.0-flash'; // 향후 대비 (현재는 404 가능성 있음)
 const GEMINI_MODEL_25 = 'gemini-2.5-flash';
-const GEMINI_MODEL_25_ALT = 'models/gemini-2.5-flash';
 
 const RSS_FEEDS = [
   'https://news.google.com/rss/search?q=economy+stock+market&hl=en-US&gl=US&ceid=US:en', // US Finance
@@ -176,15 +178,17 @@ ${JSON.stringify(allNews)}
     let summarizedNews: SummarizedItem[] | undefined;
     const modelIdsToTry = [
       GEMINI_MODEL,
-      GEMINI_MODEL_ALT,
+      GEMINI_MODEL_20,
       GEMINI_MODEL_25,
-      GEMINI_MODEL_25_ALT,
+      GEMINI_MODEL_30,
     ];
     let lastErr: unknown;
 
     for (const apiBase of GEMINI_API_BASES) {
       for (const modelId of modelIdsToTry) {
-        const url = `${apiBase}/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        // Ensure modelId has 'models/' prefix exactly once
+        const normalizedModelId = modelId.startsWith('models/') ? modelId : `models/${modelId}`;
+        const url = `${apiBase}/${normalizedModelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
         try {
           const res = await fetch(url, {
             method: 'POST',
@@ -196,7 +200,7 @@ ${JSON.stringify(allNews)}
 
           if (!res.ok) {
             if (res.status === 404) {
-              console.error('[Gemini 404] model:', modelId, '| API URL:', `${apiBase}/models/${modelId}:generateContent`);
+              console.error('[Gemini 404] model:', modelId, '| API URL:', `${apiBase}/${normalizedModelId}:generateContent`);
             }
             const errBody = await res.text();
             lastErr = new Error(`Gemini API ${res.status}: ${errBody || res.statusText}`);
