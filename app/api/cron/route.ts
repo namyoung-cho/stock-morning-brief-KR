@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRedis } from '@/lib/redis';
 import { google } from 'googleapis';
-import { GoogleGenerativeAI, GoogleSearchRetrievalTool } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const REDIS_KEY = 'daily_news';
 
