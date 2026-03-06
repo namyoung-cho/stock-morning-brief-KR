@@ -1,7 +1,8 @@
+/// <reference types="node" />
 import { NextRequest, NextResponse } from 'next/server';
 import { getRedis } from '@/lib/redis';
 import { google } from 'googleapis';
-import { GoogleGenerativeAI, DynamicRetrievalMode } from '@google/generative-ai';
+import { GoogleGenerativeAI, GoogleSearchRetrievalTool } from '@google/generative-ai';
 
 const REDIS_KEY = 'daily_news';
 
@@ -12,6 +13,13 @@ type SummarizedItem = {
   tickers: string[];
   section?: 'kr' | 'us';
 };
+
+interface GeminiNewsItem {
+  title: string;
+  link: string;
+  summary: string;
+  relatedCompanies: string[];
+}
 
 async function postToBlogger(newsData: SummarizedItem[]) {
   try {
@@ -41,21 +49,13 @@ async function postToBlogger(newsData: SummarizedItem[]) {
 
     let htmlContent = `<h2>[한국 경제 뉴스]</h2><ul>`;
     krNews.forEach((item) => {
-      htmlContent += `<li><strong><a href="${item.link}">${
-        item.title
-      }</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(
-        ', '
-      )}</em></li><br/>`;
+      htmlContent += `<li><strong><a href="${item.link}">${item.title}</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(', ')}</em></li><br/>`;
     });
     htmlContent += `</ul>`;
 
     htmlContent += `<h2>[미국 경제 뉴스]</h2><ul>`;
     usNews.forEach((item) => {
-      htmlContent += `<li><strong><a href="${item.link}">${
-        item.title
-      }</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(
-        ', '
-      )}</em></li><br/>`;
+      htmlContent += `<li><strong><a href="${item.link}">${item.title}</a></strong><br/>${item.summary}<br/><em>관련 기업: ${item.tickers.join(', ')}</em></li><br/>`;
     });
     htmlContent += `</ul>`;
 
@@ -67,16 +67,16 @@ async function postToBlogger(newsData: SummarizedItem[]) {
       },
     });
     console.log('Successfully posted to Blogger');
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error posting to Blogger:', error);
   }
 }
 
-async function fetchNewsFromGemini(prompt: string, apiKey: string): Promise<any[]> {
+async function fetchNewsFromGemini(prompt: string, apiKey: string): Promise<GeminiNewsItem[]> {
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
-    tools: [{ googleSearchRetrieval: {} } as any],
+    tools: [{ googleSearchRetrieval: {} }],
   });
 
   const result = await model.generateContent({
@@ -88,18 +88,20 @@ async function fetchNewsFromGemini(prompt: string, apiKey: string): Promise<any[
 
   const response = result.response;
   const text = response.text();
+
+  type GeminiRawResponse = GeminiNewsItem[] | { news: GeminiNewsItem[] };
   
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(text) as GeminiRawResponse;
     return Array.isArray(parsed) ? parsed : (parsed.news || []);
-  } catch (e) {
+  } catch (error: unknown) {
     // Fallback if not pure JSON
     const jsonMatch = text.match(/\[[\s\S]*\]/) || text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]) as GeminiRawResponse;
       return Array.isArray(parsed) ? parsed : (parsed.news || []);
     }
-    throw new Error('Failed to parse JSON from Gemini');
+    throw new Error('Failed to parse JSON from Gemini', { cause: error });
   }
 }
 
@@ -121,17 +123,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const promptKr = `오늘 대한민국 주요 경제 및 증시 뉴스를 실시간으로 검색해서 가장 중요한 5가지를 요약해줘, 기사 하단에 관련 기업중 주도적인 기업의 이름도 추가해줘.
-결과는 반드시 다음과 같은 JSON 형식의 배열로만 응답해줘. 다른 설명은 생략해.
-[
-  { "title": "뉴스 제목", "link": "기사 URL", "summary": "요약 내용", "relatedCompanies": ["기업1", "기업2"] }
-]`;
+    const promptKr = `오늘 대한민국 주요 경제 및 증시 뉴스를 실시간으로 검색해서 가장 중요한 5가지를 요약해줘, 기사 하단에 관련 기업중 주도적인 기업의 이름도 추가해줘.\r\n결과는 반드시 다음과 같은 JSON 형식의 배열로만 응답해줘. 다른 설명은 생략해.\r\n[
+  { "title": "뉴스 제목", "link": "기사 URL", "summary": "요약 내용", "relatedCompanies": ["기업1", "기업2"] }\r\n]`;
 
-    const promptUs = `Today, search for and summarize the 5 most important real-time major economic and stock market news from the United States. Include leading related companies for each news.
-Response must be only a JSON array in the following format. Do not include any other text.
-[
-  { "title": "News Title", "link": "Article URL", "summary": "Summary text", "relatedCompanies": ["Company1", "Company2"] }
-]`;
+    const promptUs = `Today, search for and summarize the 5 most important real-time major economic and stock market news from the United States. Include leading related companies for each news.\r\nResponse must be only a JSON array in the following format. Do not include any other text.\r\n[
+  { "title": "News Title", "link": "Article URL", "summary": "Summary text", "relatedCompanies": ["Company1", "Company2"] }\r\n]`;
 
     const [krRaw, usRaw] = await Promise.all([
       fetchNewsFromGemini(promptKr, apiKey),
@@ -174,8 +170,12 @@ Response must be only a JSON array in the following format. Do not include any o
       news: summarizedNews
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Cron job error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    let errorMessage = 'An unknown error occurred';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
