@@ -76,14 +76,15 @@ async function fetchNewsFromGemini(prompt: string, apiKey: string): Promise<Gemi
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
-    tools: [{ googleSearchRetrieval: {} }],
   });
 
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
       responseMimeType: "application/json",
-    }
+    },
+    // @ts-expect-error The Google Search tool type is not correctly recognized by the SDK's Tool interface for direct use.
+    tools: [{ googleSearch: {} }],
   });
 
   const response = result.response;
