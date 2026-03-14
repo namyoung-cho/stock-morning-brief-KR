@@ -81,7 +81,6 @@ async function fetchNewsFromGemini(prompt: string, apiKey: string): Promise<Gemi
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
-      responseMimeType: "application/json",
     },
     // @ts-expect-error The Google Search tool type is not correctly recognized by the SDK's Tool interface for direct use.
     tools: [{ googleSearch: {} }],
@@ -124,11 +123,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const promptKr = `오늘 대한민국 주요 경제 및 증시 뉴스를 실시간으로 검색해서 가장 중요한 5가지를 요약해줘, 기사 하단에 관련 기업중 주도적인 기업의 이름도 추가해줘.\r\n결과는 반드시 다음과 같은 JSON 형식의 배열로만 응답해줘. 다른 설명은 생략해.\r\n[
-  { "title": "뉴스 제목", "link": "기사 URL", "summary": "요약 내용", "relatedCompanies": ["기업1", "기업2"] }\r\n]`;
+    const promptKr = `오늘 대한민국 주요 경제 및 증시 뉴스를 실시간으로 검색해서 가장 중요한 5가지를 요약해줘, 기사 하단에 관련 기업중 주도적인 기업의 이름도 추가해줘.\r\n반드시 다른 설명 없이 순수한 JSON 형식으로만 답변해줘. 마크다운 기호("""json)도 포함하지 마.\r\n[\r\n  { "title": "뉴스 제목", "link": "기사 URL", "summary": "요약 내용", "relatedCompanies": ["기업1", "기업2"] }\r\n]`;
 
-    const promptUs = `Today, search for and summarize the 5 most important real-time major economic and stock market news from the United States. Include leading related companies for each news.\r\nResponse must be only a JSON array in the following format. Do not include any other text.\r\n[
-  { "title": "News Title", "link": "Article URL", "summary": "Summary text", "relatedCompanies": ["Company1", "Company2"] }\r\n]`;
+    const promptUs = `Today, search for and summarize the 5 most important real-time major economic and stock market news from the United States. Include leading related companies for each news.\r\nResponse must be only a pure JSON array, without any other explanation or markdown symbols (\"""json).\r\n[\r\n  { "title": "News Title", "link": "Article URL", "summary": "Summary text", "relatedCompanies": ["Company1", "Company2"] }\r\n]`;
 
     const [krRaw, usRaw] = await Promise.all([
       fetchNewsFromGemini(promptKr, apiKey),
